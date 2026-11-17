@@ -1,0 +1,178 @@
+{
+  "info": {
+    "name": "Moderation API",
+    "description": "Escenarios del sistema de moderación. Ejecutar en orden: los envíos dejan comentarios en revisión que luego se aprueban o rechazan. Para la ráfaga, usar el Collection Runner sobre 'Ráfaga' con 20 iteraciones (o reiniciar la API antes, ya que el límite es de THROTTLE_LIMIT envíos por minuto por IP).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "moderatorKey", "value": "cambia-esta-clave" },
+    { "key": "commentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Envío legítimo (201)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('201 publicado', () => pm.response.to.have.status(201));",
+              "pm.test('No expone reason ni confidence', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.not.have.property('reason');",
+              "  pm.expect(body).to.not.have.property('confidence');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"ana\",\n  \"text\": \"El pedido llegó a tiempo y la atención fue excelente, volveré a comprar.\"\n}"
+        },
+        "url": "{{baseUrl}}/comments"
+      }
+    },
+    {
+      "name": "2. Envío spam (422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('422 bloqueado', () => pm.response.to.have.status(422));"] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"bot-spam\",\n  \"text\": \"¡¡¡GANA DINERO DESDE CASA!!! Entra ya a https://bit.ly/gana-ya\"\n}"
+        },
+        "url": "{{baseUrl}}/comments"
+      }
+    },
+    {
+      "name": "3. Envío fraude (422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('422 bloqueado', () => pm.response.to.have.status(422));"] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"bot-fraude\",\n  \"text\": \"Ganaste un premio, envía tu número de tarjeta para reclamarlo\"\n}"
+        },
+        "url": "{{baseUrl}}/comments"
+      }
+    },
+    {
+      "name": "4. Envío dudoso (202)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('202 en revisión', () => pm.response.to.have.status(202));"] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"carlos\",\n  \"text\": \"ESTE ES EL MEJOR LUGAR DEL MUNDO!!!!\"\n}"
+        },
+        "url": "{{baseUrl}}/comments"
+      }
+    },
+    {
+      "name": "5. Listar publicados",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/comments?page=1&limit=20"
+      }
+    },
+    {
+      "name": "6. Bandeja de revisión (moderador)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const pending = pm.response.json();",
+              "if (pending.length > 0) {",
+              "  pm.collectionVariables.set('commentId', pending[0].id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-api-key", "value": "{{moderatorKey}}" }],
+        "url": "{{baseUrl}}/moderation/pending?page=1&limit=20"
+      }
+    },
+    {
+      "name": "7. Aprobar comentario",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "x-api-key", "value": "{{moderatorKey}}" }],
+        "url": "{{baseUrl}}/moderation/{{commentId}}/approve"
+      }
+    },
+    {
+      "name": "8. Rechazar comentario (409 si ya se aprobó)",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "x-api-key", "value": "{{moderatorKey}}" }],
+        "url": "{{baseUrl}}/moderation/{{commentId}}/reject"
+      }
+    },
+    {
+      "name": "9. Moderación sin API key (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/moderation/pending"
+      }
+    },
+    {
+      "name": "10. Ráfaga (correr 20 veces en el Runner → 429)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('201 o 429', () => pm.expect(pm.response.code).to.be.oneOf([201, 429]));",
+              "if (pm.response.code === 429) {",
+              "  pm.test('Trae Retry-After', () => pm.response.to.have.header('Retry-After'));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"bot-rafaga\",\n  \"text\": \"Comentario normal número {{$randomInt}} sobre el servicio\"\n}"
+        },
+        "url": "{{baseUrl}}/comments"
+      }
+    }
+  ]
+}
